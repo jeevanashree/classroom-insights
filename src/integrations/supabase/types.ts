@@ -14,6 +14,68 @@ export type Database = {
   }
   public: {
     Tables: {
+      meetings: {
+        Row: {
+          code: string
+          created_at: string
+          id: string
+          is_active: boolean
+          teacher_name: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          teacher_name: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          teacher_name?: string
+        }
+        Relationships: []
+      }
+      participants: {
+        Row: {
+          attention: number
+          emotion: string
+          id: string
+          joined_at: string
+          meeting_id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          attention?: number
+          emotion?: string
+          id?: string
+          joined_at?: string
+          meeting_id: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          attention?: number
+          emotion?: string
+          id?: string
+          joined_at?: string
+          meeting_id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "participants_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "meetings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       reports: {
         Row: {
           avg_attention: number
