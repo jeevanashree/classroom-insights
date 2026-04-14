@@ -1,10 +1,8 @@
 import { Link, useLocation } from "react-router-dom";
-import { BarChart3, Monitor, FileText, MessageSquare } from "lucide-react";
+import { BarChart3, FileText, MessageSquare, Home as HomeIcon } from "lucide-react";
 
-// Navigation items for the app
 const navItems = [
-  { to: "/", label: "Dashboard", icon: BarChart3 },
-  { to: "/live", label: "Live Monitor", icon: Monitor },
+  { to: "/", label: "Home", icon: HomeIcon },
   { to: "/reports", label: "Reports", icon: FileText },
   { to: "/query", label: "Query", icon: MessageSquare },
 ];
@@ -12,16 +10,16 @@ const navItems = [
 const Navbar = () => {
   const location = useLocation();
 
+  // Hide navbar inside meeting rooms
+  if (location.pathname.startsWith("/meeting/")) return null;
+
   return (
     <nav className="border-b bg-card px-6 py-3">
       <div className="container mx-auto flex items-center justify-between">
-        {/* App title */}
         <Link to="/" className="flex items-center gap-2 font-bold text-lg text-primary">
           <BarChart3 className="h-6 w-6" />
           Smart Classroom
         </Link>
-
-        {/* Navigation links */}
         <div className="flex items-center gap-1">
           {navItems.map(({ to, label, icon: Icon }) => {
             const isActive = location.pathname === to;
