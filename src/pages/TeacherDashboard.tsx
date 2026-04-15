@@ -1,234 +1,120 @@
-import { useEffect, useState, useCallback } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Users, Brain, Smile, Copy, Check } from "lucide-react";
-import StatCard from "@/components/StatCard";
+import { useAuth } from "@/contexts/AuthContext";
+import { useSpeechToText } from "@/hooks/useSpeechToText";
+import { Copy, Mic, MicOff, Video, VideoOff, Users, PhoneOff } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { useNavigate } from "react-router-dom";
 
-// Participant type from DB
-interface Participant {
-  id: string;
-  name: string;
-  attention: number;
-  emotion: string;
-  updated_at: string;
-}
+interface Participant { id: string; name: string; attention: number; emotion: string; updated_at: string; }
+interface Props { meetingId: string; }
 
-interface Meeting {
-  id: string;
-  code: string;
-  teacher_name: string;
-  is_active: boolean;
-}
+const EMOTIONS = ["Happy", "Sad", "Angry", "Surprised", "Neutral"] as const;
+const emotionEmoji: Record<string, string> = { Happy: "😊", Sad: "😢", Angry: "😠", Surprised: "😲", Neutral: "😐" };
+const emotionColor: Record<string, string> = { Happy: "text-green-400", Sad: "text-blue-400", Angry: "text-red-400", Surprised: "text-yellow-400", Neutral: "text-gray-400" };
 
-const TeacherDashboard = () => {
-  const { meetingId } = useParams();
-  const [meeting, setMeeting] = useState<Meeting | null>(null);
+const TeacherDashboard = ({ meetingId }: Props) => {
+  const { toast } = useToast();
+  const navigate = useNavigate();
+  const [meetingCode, setMeetingCode] = useState("");
   const [participants, setParticipants] = useState<Participant[]>([]);
-  const [copied, setCopied] = useState(false);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [isMicOn, setIsMicOn] = useState(true);
+  const [isVideoOn, setIsVideoOn] = useState(true);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const captionChannelRef = useRef<any>(null);
+  const { transcript, interimTranscript, isListening, startListening, stopListening } = useSpeechToText();
 
-  // Fetch meeting info
+  useEffect(() => { supabase.from("meetings").select("code").eq("id", meetingId).single().then(({ data }) => { if (data) setMeetingCode(data.code); }); }, [meetingId]);
+
   useEffect(() => {
-    const fetchMeeting = async () => {
-      const { data } = await supabase
-        .from("meetings")
-        .select("*")
-        .eq("id", meetingId!)
-        .single();
-      if (data) setMeeting(data);
-    };
-    fetchMeeting();
+    let stream: MediaStream | null = null;
+    (async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: true });
+        setLocalStream(stream);
+        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+      } catch { toast({ title: "Camera error", description: "Could not access camera/mic", variant: "destructive" }); }
+    })();
+    return () => { stream?.getTracks().forEach((t) => t.stop()); };
+  }, []);
+
+  useEffect(() => {
+    supabase.from("participants").select("*").eq("meeting_id", meetingId).then(({ data }) => { if (data) setParticipants(data as Participant[]); });
+    const channel = supabase.channel(`p-${meetingId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "participants", filter: `meeting_id=eq.${meetingId}` }, (payload) => {
+        if (payload.eventType === "INSERT") setParticipants((prev) => [...prev, payload.new as Participant]);
+        else if (payload.eventType === "UPDATE") setParticipants((prev) => prev.map((p) => (p.id === (payload.new as any).id ? { ...p, ...(payload.new as Participant) } : p)));
+      }).subscribe();
+    return () => { supabase.removeChannel(channel); };
   }, [meetingId]);
 
-  // Fetch initial participants
   useEffect(() => {
-    const fetchParticipants = async () => {
-      const { data } = await supabase
-        .from("participants")
-        .select("*")
-        .eq("meeting_id", meetingId!);
-      if (data) setParticipants(data);
-    };
-    fetchParticipants();
+    const ch = supabase.channel(`captions-${meetingId}`, { config: { broadcast: { self: false } } });
+    ch.subscribe();
+    captionChannelRef.current = ch;
+    return () => { supabase.removeChannel(ch); };
   }, [meetingId]);
 
-  // Subscribe to realtime changes on participants
   useEffect(() => {
-    const channel = supabase
-      .channel(`participants-${meetingId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "participants",
-          filter: `meeting_id=eq.${meetingId}`,
-        },
-        (payload) => {
-          if (payload.eventType === "INSERT") {
-            setParticipants((prev) => [...prev, payload.new as Participant]);
-          } else if (payload.eventType === "UPDATE") {
-            setParticipants((prev) =>
-              prev.map((p) => (p.id === (payload.new as Participant).id ? (payload.new as Participant) : p))
-            );
-          } else if (payload.eventType === "DELETE") {
-            setParticipants((prev) => prev.filter((p) => p.id !== (payload.old as any).id));
-          }
-        }
-      )
-      .subscribe();
+    captionChannelRef.current?.send({ type: "broadcast", event: "caption", payload: { text: transcript + interimTranscript } });
+  }, [transcript, interimTranscript]);
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [meetingId]);
+  const toggleMic = () => { localStream?.getAudioTracks().forEach((t) => (t.enabled = !t.enabled)); setIsMicOn(!isMicOn); isMicOn ? stopListening() : startListening(); };
+  const toggleVideo = () => { localStream?.getVideoTracks().forEach((t) => (t.enabled = !t.enabled)); setIsVideoOn(!isVideoOn); };
+  const endMeeting = async () => { await supabase.from("meetings").update({ is_active: false } as any).eq("id", meetingId); localStream?.getTracks().forEach((t) => t.stop()); navigate("/"); };
+  const copyCode = () => { navigator.clipboard.writeText(meetingCode); toast({ title: "Copied!", description: `Code: ${meetingCode}` }); };
 
-  // Copy code to clipboard
-  const copyCode = useCallback(() => {
-    if (meeting?.code) {
-      navigator.clipboard.writeText(meeting.code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  }, [meeting]);
+  useEffect(() => { startListening(); return () => stopListening(); }, []);
 
-  // End meeting
-  const endMeeting = async () => {
-    await supabase.from("meetings").update({ is_active: false }).eq("id", meetingId!);
-    setMeeting((prev) => prev ? { ...prev, is_active: false } : null);
-  };
-
-  // Compute stats
-  const avgAttention = participants.length
-    ? Math.round(participants.reduce((s, p) => s + p.attention, 0) / participants.length)
-    : 0;
-
-  const emotionCounts = { Happy: 0, Neutral: 0, Bored: 0 };
-  participants.forEach((p) => {
-    if (p.emotion in emotionCounts) emotionCounts[p.emotion as keyof typeof emotionCounts]++;
-  });
-  const dominantEmotion = Object.entries(emotionCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "N/A";
-
-  const emotionColor = (emotion: string) => {
-    switch (emotion) {
-      case "Happy": return "text-accent";
-      case "Bored": return "text-warning";
-      default: return "text-primary";
-    }
-  };
-
-  if (!meeting) {
-    return <div className="text-center py-12 text-muted-foreground">Loading meeting...</div>;
-  }
+  const avgAttention = participants.length ? Math.round(participants.reduce((s, p) => s + Number(p.attention), 0) / participants.length) : 0;
+  const emotionCounts = EMOTIONS.reduce((acc, e) => { acc[e] = participants.filter((p) => p.emotion === e).length; return acc; }, {} as Record<string, number>);
 
   return (
-    <div className="space-y-6">
-      {/* Header with meeting code */}
-      <div className="flex items-start justify-between flex-wrap gap-4">
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Teacher Dashboard</h1>
-          <p className="text-muted-foreground">Welcome, {meeting.teacher_name}</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="bg-card border rounded-xl px-5 py-3 flex items-center gap-3">
-            <span className="text-sm text-muted-foreground">Join Code:</span>
-            <span className="font-mono text-xl font-bold tracking-widest text-foreground">{meeting.code}</span>
-            <button onClick={copyCode} className="text-muted-foreground hover:text-foreground transition-colors">
-              {copied ? <Check className="h-4 w-4 text-accent" /> : <Copy className="h-4 w-4" />}
-            </button>
+          <h1 className="text-xl font-bold text-foreground">Teacher Dashboard</h1>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-sm text-muted-foreground">Code:</span>
+            <span className="font-mono text-lg font-bold text-primary tracking-widest">{meetingCode}</span>
+            <button onClick={copyCode} className="p-1 hover:bg-muted rounded"><Copy className="h-4 w-4 text-muted-foreground" /></button>
           </div>
-          {meeting.is_active && (
-            <button
-              onClick={endMeeting}
-              className="px-4 py-3 rounded-xl bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors"
-            >
-              End Meeting
-            </button>
-          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={toggleMic} className={`p-2.5 rounded-lg ${isMicOn ? "bg-primary text-primary-foreground" : "bg-destructive text-destructive-foreground"}`}>{isMicOn ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}</button>
+          <button onClick={toggleVideo} className={`p-2.5 rounded-lg ${isVideoOn ? "bg-primary text-primary-foreground" : "bg-destructive text-destructive-foreground"}`}>{isVideoOn ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}</button>
+          <button onClick={endMeeting} className="px-4 py-2.5 rounded-lg bg-destructive text-destructive-foreground text-sm font-medium flex items-center gap-2"><PhoneOff className="h-4 w-4" /> End</button>
         </div>
       </div>
-
-      {!meeting.is_active && (
-        <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-lg text-sm font-medium">
-          This meeting has ended.
-        </div>
-      )}
-
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <StatCard
-          title="Students Joined"
-          value={participants.length}
-          icon={<Users className="h-5 w-5" />}
-          color="primary"
-        />
-        <StatCard
-          title="Avg Attention"
-          value={`${avgAttention}%`}
-          icon={<Brain className="h-5 w-5" />}
-          color="accent"
-        />
-        <StatCard
-          title="Dominant Emotion"
-          value={dominantEmotion}
-          icon={<Smile className="h-5 w-5" />}
-          color="warning"
-        />
-      </div>
-
-      {/* Emotion distribution bars */}
-      <div className="bg-card border rounded-xl p-6 shadow-sm">
-        <h2 className="text-lg font-semibold mb-4 text-card-foreground">Emotion Distribution</h2>
-        {participants.length === 0 ? (
-          <p className="text-muted-foreground text-sm">Waiting for students to join...</p>
-        ) : (
-          <div className="space-y-3">
-            {Object.entries(emotionCounts).map(([emotion, count]) => {
-              const pct = Math.round((count / participants.length) * 100);
-              return (
-                <div key={emotion} className="flex items-center gap-3">
-                  <span className="w-16 text-sm font-medium text-muted-foreground">{emotion}</span>
-                  <div className="flex-1 bg-muted rounded-full h-3 overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all duration-500 ${
-                        emotion === "Happy" ? "bg-accent" : emotion === "Neutral" ? "bg-primary" : "bg-warning"
-                      }`}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  <span className="w-16 text-sm text-right text-muted-foreground">{count} ({pct}%)</span>
-                </div>
-              );
-            })}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-1">
+          <div className="bg-card border rounded-xl overflow-hidden">
+            <video ref={localVideoRef} autoPlay muted playsInline className="w-full aspect-video object-cover bg-black" />
+            <div className="p-2 text-center text-sm text-muted-foreground">You</div>
           </div>
-        )}
-      </div>
-
-      {/* Per-student cards */}
-      <div className="bg-card border rounded-xl p-6 shadow-sm">
-        <h2 className="text-lg font-semibold mb-4 text-card-foreground">Students ({participants.length})</h2>
-        {participants.length === 0 ? (
-          <p className="text-muted-foreground text-sm">Share the code above with your students to get started.</p>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {participants.map((p) => (
-              <div key={p.id} className="flex items-center justify-between bg-muted/50 rounded-lg p-4">
-                <div>
-                  <p className="font-medium text-foreground">{p.name}</p>
-                  <p className={`text-sm ${emotionColor(p.emotion)}`}>{p.emotion}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-lg font-bold text-foreground">{p.attention}%</p>
-                  <div className="w-16 bg-muted rounded-full h-1.5 mt-1">
-                    <div
-                      className="h-full bg-primary rounded-full transition-all duration-700"
-                      style={{ width: `${p.attention}%` }}
-                    />
-                  </div>
-                </div>
+          <div className="mt-3 bg-card border rounded-xl p-3">
+            <p className="text-xs font-medium text-muted-foreground mb-1">🎤 Live Captions {isListening ? "(active)" : "(paused)"}</p>
+            <p className="text-sm text-foreground min-h-[40px]">{transcript.slice(-200)}<span className="text-muted-foreground italic">{interimTranscript}</span></p>
+          </div>
+        </div>
+        <div className="lg:col-span-2 space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="bg-card border rounded-xl p-4 text-center"><Users className="h-5 w-5 mx-auto text-primary mb-1" /><p className="text-2xl font-bold text-foreground">{participants.length}</p><p className="text-xs text-muted-foreground">Students</p></div>
+            <div className="bg-card border rounded-xl p-4 text-center"><p className="text-2xl font-bold text-foreground">{avgAttention}%</p><p className="text-xs text-muted-foreground">Avg Attention</p><div className="w-full bg-muted rounded-full h-1.5 mt-2"><div className="h-full bg-primary rounded-full transition-all" style={{ width: `${avgAttention}%` }} /></div></div>
+            <div className="bg-card border rounded-xl p-4 col-span-2 sm:col-span-1"><p className="text-xs text-muted-foreground mb-2">Emotions</p>
+              {EMOTIONS.map((e) => (<div key={e} className="flex items-center gap-1 text-xs mb-1"><span>{emotionEmoji[e]}</span><span className="w-14 text-foreground">{e}</span><div className="flex-1 bg-muted rounded-full h-1.5"><div className="h-full bg-primary/70 rounded-full" style={{ width: participants.length ? `${(emotionCounts[e] / participants.length) * 100}%` : "0%" }} /></div><span className="text-muted-foreground w-3 text-right">{emotionCounts[e]}</span></div>))}
+            </div>
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-foreground mb-2">Students</h2>
+            {participants.length === 0 ? <p className="text-sm text-muted-foreground">Waiting for students...</p> : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {participants.map((p) => (<div key={p.id} className="bg-card border rounded-xl p-3"><p className="text-sm font-medium text-foreground truncate">{p.name}</p><div className="flex items-center justify-between text-xs mt-1"><span className={Number(p.attention) >= 70 ? "text-green-400" : Number(p.attention) >= 40 ? "text-yellow-400" : "text-red-400"}>{p.attention}%</span><span>{emotionEmoji[p.emotion] || "😐"} <span className={emotionColor[p.emotion] || ""}>{p.emotion}</span></span></div></div>))}
               </div>
-            ))}
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

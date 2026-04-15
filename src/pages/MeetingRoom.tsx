@@ -2,15 +2,15 @@ import { useParams, useSearchParams } from "react-router-dom";
 import TeacherDashboard from "./TeacherDashboard";
 import StudentView from "./StudentView";
 
-// Route handler: decides teacher vs student view based on query param
 const MeetingRoom = () => {
+  const { meetingId } = useParams<{ meetingId: string }>();
   const [searchParams] = useSearchParams();
-  const role = searchParams.get("role");
+  const role = searchParams.get("role") || "student";
+  const pid = searchParams.get("pid");
 
-  if (role === "teacher") {
-    return <TeacherDashboard />;
-  }
-  return <StudentView />;
+  if (!meetingId) return <p className="text-center text-destructive">Invalid meeting.</p>;
+  if (role === "teacher") return <TeacherDashboard meetingId={meetingId} />;
+  return <StudentView meetingId={meetingId} participantId={pid || ""} />;
 };
 
 export default MeetingRoom;
