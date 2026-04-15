@@ -14,6 +14,48 @@ export type Database = {
   }
   public: {
     Tables: {
+      frame_logs: {
+        Row: {
+          attention: number
+          emotion: string
+          id: string
+          logged_at: string | null
+          meeting_id: string | null
+          participant_id: string | null
+        }
+        Insert: {
+          attention: number
+          emotion: string
+          id?: string
+          logged_at?: string | null
+          meeting_id?: string | null
+          participant_id?: string | null
+        }
+        Update: {
+          attention?: number
+          emotion?: string
+          id?: string
+          logged_at?: string | null
+          meeting_id?: string | null
+          participant_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "frame_logs_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "meetings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "frame_logs_participant_id_fkey"
+            columns: ["participant_id"]
+            isOneToOne: false
+            referencedRelation: "participants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       meetings: {
         Row: {
           code: string
@@ -21,6 +63,7 @@ export type Database = {
           id: string
           is_active: boolean
           teacher_name: string
+          user_id: string | null
         }
         Insert: {
           code: string
@@ -28,6 +71,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           teacher_name: string
+          user_id?: string | null
         }
         Update: {
           code?: string
@@ -35,6 +79,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           teacher_name?: string
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -45,8 +90,10 @@ export type Database = {
           id: string
           joined_at: string
           meeting_id: string
+          mic_volume: number | null
           name: string
           updated_at: string
+          user_id: string | null
         }
         Insert: {
           attention?: number
@@ -54,8 +101,10 @@ export type Database = {
           id?: string
           joined_at?: string
           meeting_id: string
+          mic_volume?: number | null
           name: string
           updated_at?: string
+          user_id?: string | null
         }
         Update: {
           attention?: number
@@ -63,8 +112,10 @@ export type Database = {
           id?: string
           joined_at?: string
           meeting_id?: string
+          mic_volume?: number | null
           name?: string
           updated_at?: string
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -75,6 +126,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          display_name: string
+          id: string
+          role: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          display_name: string
+          id?: string
+          role?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string
+          id?: string
+          role?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       reports: {
         Row: {
@@ -97,6 +172,71 @@ export type Database = {
           date?: string
           emotion?: string
           id?: string
+        }
+        Relationships: []
+      }
+      signals: {
+        Row: {
+          created_at: string | null
+          from_id: string
+          id: string
+          meeting_id: string | null
+          signal: Json
+          to_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          from_id: string
+          id?: string
+          meeting_id?: string | null
+          signal: Json
+          to_id: string
+        }
+        Update: {
+          created_at?: string | null
+          from_id?: string
+          id?: string
+          meeting_id?: string | null
+          signal?: Json
+          to_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "signals_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "meetings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      student_engagement: {
+        Row: {
+          attention: number | null
+          emotion: string | null
+          id: string
+          meeting_id: string
+          mic_volume: number | null
+          student_name: string
+          updated_at: string | null
+        }
+        Insert: {
+          attention?: number | null
+          emotion?: string | null
+          id?: string
+          meeting_id: string
+          mic_volume?: number | null
+          student_name: string
+          updated_at?: string | null
+        }
+        Update: {
+          attention?: number | null
+          emotion?: string | null
+          id?: string
+          meeting_id?: string
+          mic_volume?: number | null
+          student_name?: string
+          updated_at?: string | null
         }
         Relationships: []
       }
